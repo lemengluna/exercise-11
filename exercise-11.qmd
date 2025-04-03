@@ -1,0 +1,365 @@
+---
+title: "exercise-11"
+format: html
+---
+
+load in packages
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(skimr)
+library(infer)
+library(ggplot2)
+library(patchwork)
+```
+
+load in data
+
+```{r}
+d <- read_csv("https://raw.githubusercontent.com/difiore/ada-datasets/refs/heads/main/AVONETdataset1.csv")
+
+d <- d %>% select(Species1, Family1, Order1, Beak.Length_Culmen, Beak.Width, Beak.Depth, Tarsus.Length, Wing.Length, Tail.Length, Mass, Habitat, Migration, Trophic.Level, Trophic.Niche, Min.Latitude, Max.Latitude, Centroid.Latitude, Primary.Lifestyle, Range.Size)
+
+skim(d)
+```
+
+There are 7 character variables and 12 numeric variables.
+
+### Challenge 1
+
+#### step 1
+
+```{r}
+# boxplot of log(Mass) in relation to Trophic.Level 
+p1 <- ggplot(data=d %>% drop_na(Trophic.Level),
+       aes(x=Trophic.Level, y=log(Mass)))+
+        geom_boxplot()+
+        geom_jitter()
+
+# boxplot of log(Mass) in relation to Migration
+d <- d %>% mutate(Migration = as.factor(Migration))
+p2 <- ggplot(data=d %>% drop_na(Migration),
+       aes(x=Migration, y=log(Mass)))+
+        geom_boxplot()+
+        geom_jitter()
+
+p1+p2
+```
+
+#### step 2
+
+```{r}
+m1 <- lm(log(Mass) ~ Trophic.Level, data=d)
+summary(m1)
+
+m2 <- lm(log(Mass) ~ Migration, data=d)
+summary(m2)
+```
+
+The F statistic large enough to reject the null hypothesis of an F value of zero for both models. log(Mass) is associated with Trophic.Level and Migration category.
+
+The Migration level 2 and 3 are different than Migration level 1 (the reference level).
+
+```{r}
+#relevel migration levels
+d <- d %>% mutate(Migration = relevel(as.factor(Migration), ref="2"))
+m2 <- lm(log(Mass) ~ Migration, data=d)
+summary(m2)
+```
+
+The Migration level 3 is different from Migration level 2 (the reference level).
+
+#### step 3
+
+```{r}
+m3 <- aov(log(Mass) ~ Migration, data=d)
+posthoc <- TukeyHSD(m3, which = "Migration", ordered = TRUE, conf.level = 0.95)
+posthoc
+```
+
+The result shows that each category is significantly different from one another.
+
+#### step 4
+
+```{r}
+d <- d %>% mutate(logMass = log(Mass))
+permutated.F <- d %>% 
+  specify(logMass ~ Trophic.Level) %>% 
+  hypothesize(null = "independence") %>% 
+  generate(reps = 1000, type = "permute") %>% 
+  calculate(stat = "F")
+
+original.F <- aov(log(Mass) ~ Trophic.Level, data=d) %>% 
+  broom::tidy() %>% 
+  filter(term == "Trophic.Level")
+
+visualize(permutated.F) +
+  shade_p_value(obs_stat = original.F$statistic, direction = "greater")
+
+p_value <- permutated.F %>% get_p_value(obs_stat = original.F$statistic, direction = "greater")
+p_value
+```
+
+The p value is close to 0 which suggest the F statistic is large enough to reject the null hypothesis of an F value of zero.
+
+### Challenge 2
+
+#### step 1
+
+```{r}
+m4 <- lm(log(Beak.Length_Culmen) ~ log(Mass), data=d)
+d <- d %>% mutate(relative_beak_length = m4$residuals)
+
+m5 <- lm(log(Tarsus.Length) ~ log(Mass), data=d)
+d <- d %>% mutate(relative_tarsus_length = m5$residuals)
+```
+
+#### step 2
+
+```{r}
+p3 <- ggplot(data=d %>% drop_na(Primary.Lifestyle),
+       aes(x= Primary.Lifestyle, y=relative_tarsus_length)) +
+  geom_violin()
+
+p4 <- ggplot(data=d %>% drop_na(Trophic.Niche),
+       aes(x= Trophic.Niche, y=relative_beak_length)) +
+  geom_violin()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p3+p4
+```
+
+#### step 3
+
+```{r}
+hist(d$Range.Size)
+hist(log(d$Range.Size))
+# I will perform a log transformation on Range.Size in ANOVA
+
+m6 <- aov(log(Range.Size) ~ Migration, data=d %>% drop_na(Migration))
+summary(m6)
+
+(percent <- 8071/(8071+84798))
+```
+
+Range size is associated with form of migration. Around 8.7% of the variance in range size is associated with migration behavior style.
+
+```{r}
+m7 <- lm(log(Range.Size) ~ Migration, data=d %>% drop_na(Migration))
+summary(m7)
+
+d <- d %>% mutate(Migration = relevel(as.factor(Migration), ref="1"))
+m8 <- lm(log(Range.Size) ~ Migration, data=d %>% drop_na(Migration))
+summary(m8)
+
+posthoc1 <- TukeyHSD(m6, which = "Migration", ordered = TRUE, conf.level = 0.95)
+posthoc1
+```
+
+When reference level is Migration level 2, level 1 and 3 are both different than level 2. When reference level is Migration level 1, level 3 is different than level 1. Based on post-hoc test, all categories are significantly different from one another.
+
+#### step 4
+
+```{r}
+d_p <- d %>% filter(Order1 == "Passeriformes")
+# plots for each predictor
+p5 <- ggplot(d_p, aes(x = Primary.Lifestyle, y = relative_beak_length)) +
+  geom_boxplot()
+
+p6 <- ggplot(d_p, aes(x = Trophic.Level, y = relative_beak_length)) +
+  geom_boxplot()
+
+p5+p6
+
+# plot for the interaction of predictors
+p7 <- ggplot(d_p, aes(x = interaction(Primary.Lifestyle, Trophic.Level),
+               y = relative_beak_length)) +
+  geom_boxplot()+
+   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p7
+
+# linear models for each predictor
+m9 <- lm(relative_beak_length ~ Primary.Lifestyle, data=d_p)
+summary(m9)
+
+m10 <- lm(relative_beak_length ~ Trophic.Level, data=d_p)
+summary(m10)
+```
+
+Relative beak length is associated with primary lifestyle and tropic level of song birds.
+
+#### step 5
+
+```{r}
+m11 <- aov(relative_beak_length ~ Primary.Lifestyle + Trophic.Level, data=d_p)
+summary(m11)
+```
+
+#### step 6
+
+```{r}
+m12 <- aov(relative_beak_length ~ Primary.Lifestyle + Trophic.Level + Primary.Lifestyle:Trophic.Level, data=d_p)
+summary(m12)
+
+```
+
+#### step 7
+
+```{r}
+interaction.plot(x.factor = d_p$Primary.Lifestyle, xlab = "lifestyle", trace.factor = d_p$Trophic.Level, trace.label = "trophic_level",
+    response = d_p$relative_beak_length, fun = base::mean, ylab = "relative_beak_length")
+
+```
+
+The plot shows that there are interactions between lifestyle and trophic levels.
+
+#### step 8
+
+**for m1 \<- lm(log(Mass) \~ Trophic.Level, data=d)**
+
+```{r}
+d_m1 <- d %>% drop_na(Trophic.Level) %>% mutate(res = residuals(m1))
+
+  #calculate standard deviations within each group
+sd_summary_m1 <- d_m1 %>%
+  group_by(Trophic.Level) %>%
+  summarise(sd_resid = sd(res), n = n()) %>%
+  arrange(desc(sd_resid))
+sd_summary_m1
+
+  #calculate ratio
+cat("SD ratio (max / min): ", max(sd_summary_m1$sd_resid) / min(sd_summary_m1$sd_resid), "\n")
+ #This suggests possible violation of the equal variance assumption, particularly influenced by the small sample size in the Scavenger group.
+
+  #visualization
+p8 <- ggplot(d_m1, aes(x = res)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~ Trophic.Level)
+p9 <- ggplot(d_m1, aes(sample = res)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~ Trophic.Level)
+p8+p9
+```
+
+Histograms and QQ plots of residuals indicate that the **Herbivore group shows approximately normal residuals**, while **Carnivore and Omnivore groups display right-skewness** and curvature in QQ plots, suggesting deviations from normality.
+
+**for m2 \<- lm(log(Mass) \~ Migration, data=d)**
+
+```{r}
+d_m2 <- d %>% drop_na(Migration) %>% mutate(res = residuals(m2))
+
+  #calculate standard deviations within each group
+sd_summary_m2 <- d_m2 %>%
+  group_by(Migration) %>%
+  summarise(sd_resid = sd(res), n = n()) %>%
+  arrange(desc(sd_resid))
+sd_summary_m2
+
+  #calculate ratio
+cat("SD ratio (max / min): ", max(sd_summary_m2$sd_resid) / min(sd_summary_m2$sd_resid), "\n")
+#This indicates that the assumption of equal variances is met.
+
+  #visualization
+p10 <- ggplot(d_m2, aes(x = res)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~ Migration)
+p11 <- ggplot(d_m2, aes(sample = res)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~ Migration)
+p10+p11
+
+```
+
+Histograms and QQ plots suggest that residuals are not normally distributed within migration categories. All groups show right-skewed distributions and curvature in QQ plots, especially in the largest group (Migration = 1).
+
+**for m7 \<- lm(log(Range.Size) \~ Migration, data=d)**
+
+```{r}
+d_m7 <- d %>% filter(!is.na(Range.Size)& !is.na(Migration))%>% mutate(res = residuals(m7))
+
+  #calculate standard deviations within each group
+sd_summary_m7 <- d_m7 %>%
+  group_by(Migration) %>%
+  summarise(sd_resid = sd(res), n = n()) %>%
+  arrange(desc(sd_resid))
+sd_summary_m7
+
+  #calculate ratio
+cat("SD ratio (max / min): ", max(sd_summary_m7$sd_resid) / min(sd_summary_m7$sd_resid), "\n")
+ #This indicates that the assumption of equal variances is met.
+
+
+  #visualization
+p12 <- ggplot(d_m7, aes(x = res)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~ Migration)
+p13 <- ggplot(d_m7, aes(sample = res)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~ Migration)
+p12+p13
+
+```
+
+Histograms and QQ plots show approximately normal distributions in all groups, with minor left-skew and slight deviation at the tails in QQ plots, particularly for Migration group 1. Overall, the normality assumption appears to be met
+
+**for m9 \<- lm(relative_beak_length \~ Primary.Lifestyle, data=d_p)**
+
+```{r}
+d_m9 <- d_p %>% filter(!is.na(relative_beak_length)& !is.na(Primary.Lifestyle))%>% mutate(res = residuals(m9))
+
+  #calculate standard deviations within each group
+sd_summary_m9 <- d_m9 %>%
+  group_by(Primary.Lifestyle) %>%
+  summarise(sd_resid = sd(res), n = n()) %>%
+  arrange(desc(sd_resid))
+sd_summary_m9
+
+  #calculate ratio
+cat("SD ratio (max / min): ", max(sd_summary_m9$sd_resid) / min(sd_summary_m9$sd_resid), "\n")
+#This indicates that the assumption of equal variances is met.
+
+  #visualization
+p14 <- ggplot(d_m9, aes(x = res)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~ Primary.Lifestyle)
+p15 <- ggplot(d_m9, aes(sample = res)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~ Primary.Lifestyle)
+p14+p15
+```
+
+Histograms and QQ plots show that residuals are approximately normally distributed in all groups, with mild curvature at the tails, especially in larger groups. The Aerial group’s small sample size limits interpretation. Overall, this model meets the assumptions of linear regression.
+
+**for m10 \<- lm(relative_beak_length \~ Trophic.Level, data=d_p)**
+
+```{r}
+d_m10 <- d_p %>% filter(!is.na(relative_beak_length)& !is.na(Trophic.Level))%>% mutate(res = residuals(m10))
+
+  #calculate standard deviations within each group
+sd_summary_m10 <- d_m10 %>%
+  group_by(Trophic.Level) %>%
+  summarise(sd_resid = sd(res), n = n()) %>%
+  arrange(desc(sd_resid))
+sd_summary_m10
+
+  #calculate ratio
+cat("SD ratio (max / min): ", max(sd_summary_m10$sd_resid) / min(sd_summary_m10$sd_resid), "\n")
+#This indicates that the assumption of equal variances is met.
+
+  #visualization
+p16 <- ggplot(d_m10, aes(x = res)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~ Trophic.Level)
+p17 <- ggplot(d_m10, aes(sample = res)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~ Trophic.Level)
+p16+p17
+```
+
+Histograms and QQ plots show approximately normal distributions across all groups, with some mild curvature at the tails. Overall, this model meets the assumptions of linear regression.
