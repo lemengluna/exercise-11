@@ -1,0 +1,153 @@
+---
+title: "exercise11"
+format: html
+---
+
+library packages
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(skimr)
+library(ggplot2)
+library(MuMIn)
+```
+
+load in data
+
+```{r}
+d <- read_tsv("https://raw.githubusercontent.com/difiore/ada-datasets/main/Mammal_lifehistories_v2.txt")
+
+skim(d)
+```
+
+Categorical variables: order, family, genus, species.
+
+Numeric variables: mass, gestation, newborn, weaning, wean mass, AFR, max. life, litter size, litters/year, refs.
+
+### step 1
+
+```{r}
+d [d == -999] <- NA
+```
+
+### step 2
+
+```{r}
+d <- d %>% dplyr::select(-`litter size`, -refs)
+```
+
+### step 3
+
+```{r}
+d <- d %>% mutate(across(where(is.numeric), log))
+```
+
+### step 4
+
+```{r}
+m1 <- lm(`gestation(mo)`~ `mass(g)`, data = d, na.action = na.exclude)
+d$relGest <- residuals(m1) 
+
+m2 <- lm(`weaning(mo)`~ `mass(g)`, data = d, na.action = na.exclude)
+d$relWean <- residuals(m2)
+
+m3 <- lm(`AFR(mo)`~ `mass(g)`, data = d, na.action = na.exclude)
+d$relAFR <- residuals(m3)
+
+m4 <- lm(`max. life(mo)`~ `mass(g)`, data = d, na.action = na.exclude)
+d$relLife <- residuals(m4)
+
+m5 <- lm(`newborn(g)`~ `mass(g)`, data = d, na.action = na.exclude)
+d$relNewbornMass <- residuals(m5)
+
+m6 <- lm(`wean mass(g)`~ `mass(g)`, data = d, na.action = na.exclude)
+d$relWeaningMass <- residuals(m6)
+```
+
+### step 5
+
+```{r}
+#relLife ~ Order
+ggplot(d, aes(x = order, y = relLife)) +
+  geom_boxplot() +
+  labs(title = "Relative Max Lifespan by Order", y = "Residual Lifespan")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+The order Primates has the highest residual lifespan.
+
+```{r}
+#relNewbornMass ~ Order
+ggplot(d, aes(x = order, y = relNewbornMass)) +
+  geom_boxplot() +
+  labs(title = "Relative Newborn Mass by Order", y = "Residual Newborn Mass")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+The order Macroscelidea has the highest residual newborn mass.
+
+```{r}
+#relWeaningMass ~ Order
+ggplot(d, aes(x = order, y = relWeaningMass)) +
+  geom_boxplot() +
+  labs(title = "Relative Weaning Mass by Order", y = "Residual Weaning Mass")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+The order Perissodactyla has the have highest residual newborn mass.
+
+### step 6
+
+```{r}
+# for max.life(mo)
+d1 <- d %>% dplyr::select(`max. life(mo)`, `gestation(mo)`, `newborn(g)`,`weaning(mo)`, `wean mass(g)`, `litters/year`, `mass(g)`) %>% drop_na()
+
+d1m_full <- lm(data = d1,
+             `max. life(mo)` ~ `gestation(mo)`+ `newborn(g)` + `weaning(mo)` + `wean mass(g)` + `litters/year`+ `mass(g)`, na.action = na.fail)
+mods1 <- dredge(d1m_full)
+mods1_top <- mods1 %>% filter(delta <= 4)
+mods1_top
+```
+
+From the result, the best model is:
+
+`max. life(mo)` \~ `gestation(mo)`+ `litters/year`+ `mass(g)` + `weaning(mo)`
+
+5 models have a delta AICc of 4 or less.
+
+Gestation(mo), litters/year, and weaning(mo) appeared in all top models.
+
+```{r}
+mods1avg <- summary(model.avg(mods1, subset = delta <= 4, fit = T))
+mods1avg
+plot(mods1avg)
+```
+
+```{r}
+# for AFR(mo)
+d2 <- d %>% dplyr::select(`AFR(mo)`, `gestation(mo)`, `newborn(g)`,`weaning(mo)`, `wean mass(g)`, `litters/year`, `mass(g)`) %>% drop_na()
+
+d2m_full <- lm(data = d2,
+             `AFR(mo)` ~ `gestation(mo)`+ `newborn(g)` + `weaning(mo)` + `wean mass(g)` + `litters/year`+ `mass(g)`, na.action = na.fail)
+mods2 <- dredge(d2m_full)
+mods2_top <- mods2 %>% filter(delta <= 4)
+mods2_top
+```
+
+From the result, the best model is:
+
+`AFR(mo)` \~ `gestation(mo)` + `litter/year` + `mass(g)` + `weaning(mo)`
+
+7 models have a delta AICc of 4 or less.
+
+Gestation(mo), litters/year, weaning(mo) appeared in all top models.
+
+```{r}
+mods2avg <- summary(model.avg(mods2, subset = delta <= 4, fit = T))
+mods2avg
+plot(mods2avg)
+```
